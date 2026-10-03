@@ -1,0 +1,507 @@
+#include "HX711.h"
+#include "Adafruit_MAX31855.h"
+
+
+// =========================================================
+// ===================== HX711 LOAD CELL ===================
+// =========================================================
+
+#define DT 4
+#define SCK 5
+
+HX711 scale;
+
+float calibrationFactor = 9810;
+
+const float GRAVITY = 9.81;
+
+bool measuring = false;
+bool hasResult = false;
+
+float currentForce = 0;
+float lastForce = 0;
+float maxForce = 0;
+
+
+// =========================================================
+// ================= PRESSURE TRANSDUCER ===================
+// =========================================================
+
+const int pressurePin = A0;
+
+const float VREF = 5.0;
+const float VMIN = 0.5;
+const float VMAX = 4.5;
+const float PMAX = 1.2;
+
+float LP = 0;
+float MP = 0;
+
+
+// =========================================================
+// ===================== MAX31855 ===========================
+// =========================================================
+
+// Arduino UNO hardware SPI pins:
+// SCK  -> D13
+// SO   -> D12
+// CS   -> D10
+
+const int MAX31855_CS = 10;
+const int MAX31855_DO = 12;
+const int MAX31855_CLK = 13;
+
+Adafruit_MAX31855 thermocouple(
+  MAX31855_CLK,
+  MAX31855_CS,
+  MAX31855_DO
+);
+
+float currentTemperature = 0;
+float lastTemperature = 0;
+float maxTemperature = -1000;
+
+
+// =========================================================
+// ======================== MENU ============================
+// =========================================================
+
+void showMenu() {
+
+  Serial.println();
+  Serial.println("========== KAZIAH_AERORESEARCH ==========");
+  Serial.println("1. START READING");
+  Serial.println("2. STOP READING");
+  Serial.println("3. SHOW LAST RESULT");
+  Serial.println("4. TARE Load Cell");
+  Serial.println("5. SHOW MENU");
+  Serial.println("===================================");
+  Serial.println("Enter option:");
+}
+
+
+// =========================================================
+// ======================== SETUP ===========================
+// =========================================================
+
+void setup() {
+
+  Serial.begin(9600);
+
+  // -------------------------------------------------------
+  // LOAD CELL
+  // -------------------------------------------------------
+
+  scale.begin(DT, SCK);
+
+  scale.set_scale(calibrationFactor);
+
+  Serial.println("Taring Load Cell...");
+
+  scale.tare();
+
+  Serial.println("Tare Complete");
+
+
+  // -------------------------------------------------------
+  // PRESSURE TRANSDUCER
+  // -------------------------------------------------------
+
+  Serial.println("CHAMBER PRESSURE");
+
+
+  // -------------------------------------------------------
+  // MAX31855
+  // -------------------------------------------------------
+
+  Serial.println("MAX31855 THERMOCOUPLE");
+
+  delay(500);
+
+  double initialTemperature = thermocouple.readCelsius();
+
+  if (isnan(initialTemperature)) {
+
+    Serial.println("WARNING: MAX31855 NOT DETECTED!");
+
+  }
+  else {
+
+    Serial.print("Thermocouple detected. Temperature: ");
+    Serial.print(initialTemperature, 2);
+    Serial.println(" C");
+  }
+
+
+  // -------------------------------------------------------
+  // MENU
+  // -------------------------------------------------------
+
+  showMenu();
+}
+
+
+// =========================================================
+// ===================== MAIN LOOP ==========================
+// =========================================================
+
+void loop() {
+
+
+  // =======================================================
+  // CHECK USER COMMAND
+  // =======================================================
+
+  if (Serial.available() > 0) {
+
+    char command = Serial.read();
+
+
+    // =====================================================
+    // START
+    // =====================================================
+
+    if (command == '1') {
+
+      measuring = true;
+
+      maxForce = 0;
+
+      MP = 0;
+
+      maxTemperature = -1000;
+
+
+      Serial.println();
+
+      Serial.println("READING STARTED");
+
+      Serial.println("DATA FORMAT:");
+
+      Serial.println(
+        "DATA,Force(N),Pressure(MPa),Temperature(C)"
+      );
+    }
+
+
+    // =====================================================
+    // STOP
+    // =====================================================
+
+    else if (command == '2') {
+
+      measuring = false;
+
+
+      Serial.println();
+
+      Serial.println("READING STOPPED");
+
+
+      // ---------------- FORCE ----------------
+
+      Serial.print("Last Force: ");
+
+      Serial.print(lastForce, 5);
+
+      Serial.println(" N");
+
+
+      Serial.print("Maximum Force: ");
+
+      Serial.print(maxForce, 5);
+
+      Serial.println(" N");
+
+
+      // ---------------- PRESSURE ----------------
+
+      Serial.print("Last Chamber Pressure: ");
+
+      Serial.print(LP, 3);
+
+      Serial.println(" MPa");
+
+
+      Serial.print("Max. Chamber Pressure: ");
+
+      Serial.print(MP, 3);
+
+      Serial.println(" MPa");
+
+
+      // ---------------- TEMPERATURE ----------------
+
+      Serial.print("Last Temperature: ");
+
+      Serial.print(lastTemperature, 2);
+
+      Serial.println(" C");
+
+
+      if (maxTemperature > -999) {
+
+        Serial.print("Maximum Temperature: ");
+
+        Serial.print(maxTemperature, 2);
+
+        Serial.println(" C");
+      }
+
+
+      showMenu();
+    }
+
+
+    // =====================================================
+    // SHOW LAST RESULT
+    // =====================================================
+
+    else if (command == '3') {
+
+      Serial.println();
+
+      Serial.println("========== LAST RESULT ==========");
+
+
+      if (hasResult) {
+
+
+        // ---------------- FORCE ----------------
+
+        Serial.print("Last Force: ");
+
+        Serial.print(lastForce, 2);
+
+        Serial.println(" N");
+
+
+        Serial.print("Maximum Force: ");
+
+        Serial.print(maxForce, 2);
+
+        Serial.println(" N");
+
+
+        // ---------------- PRESSURE ----------------
+
+        Serial.print("Last Pressure: ");
+
+        Serial.print(LP, 3);
+
+        Serial.println(" MPa");
+
+
+        Serial.print("Max. Chamber Pressure: ");
+
+        Serial.print(MP, 3);
+
+        Serial.println(" MPa");
+
+
+        // ---------------- TEMPERATURE ----------------
+
+        Serial.print("Last Temperature: ");
+
+        Serial.print(lastTemperature, 2);
+
+        Serial.println(" C");
+
+
+        if (maxTemperature > -999) {
+
+          Serial.print("Maximum Temperature: ");
+
+          Serial.print(maxTemperature, 2);
+
+          Serial.println(" C");
+        }
+      }
+
+
+      else {
+
+        Serial.println("No measurement available.");
+      }
+
+
+      Serial.println("=================================");
+    }
+
+
+    // =====================================================
+    // TARE
+    // =====================================================
+
+    else if (command == '4') {
+
+      if (!measuring) {
+
+        Serial.println("Taring...");
+
+        scale.tare();
+
+        Serial.println("Tare Complete");
+      }
+
+      else {
+
+        Serial.println(
+          "STOP measurement before TARE."
+        );
+      }
+    }
+
+
+    // =====================================================
+    // MENU
+    // =====================================================
+
+    else if (command == '5') {
+
+      showMenu();
+    }
+  }
+
+
+  // =======================================================
+  // ===================== READINGS ========================
+  // =======================================================
+
+  if (measuring) {
+
+
+    // =====================================================
+    // LOAD CELL
+    // =====================================================
+
+    if (scale.is_ready()) {
+
+      float massKg = scale.get_units(5);
+
+      currentForce =
+        massKg * GRAVITY / 10;
+
+
+      lastForce = currentForce;
+
+      hasResult = true;
+
+
+      if (currentForce > maxForce) {
+
+        maxForce = currentForce;
+      }
+    }
+
+    else {
+
+      Serial.println("HX711 not detected!");
+    }
+
+
+    // =====================================================
+    // PRESSURE TRANSDUCER
+    // =====================================================
+
+    int adcValue = analogRead(pressurePin);
+
+
+    float voltage =
+      adcValue * (VREF / 1023.0);
+
+
+    float pressureMPa =
+      ((voltage - VMIN) /
+      (VMAX - VMIN)) * PMAX * 1000;
+
+
+    if (pressureMPa < 0) {
+
+      pressureMPa = 0;
+    }
+
+
+    LP = pressureMPa;
+
+    hasResult = true;
+
+
+    if (pressureMPa > MP) {
+
+      MP = pressureMPa;
+    }
+
+
+    // =====================================================
+    // MAX31855 THERMOCOUPLE
+    // =====================================================
+
+    double temperature =
+      thermocouple.readCelsius();
+
+
+    if (isnan(temperature)) {
+
+      Serial.println(
+        "MAX31855 ERROR: Thermocouple fault!"
+      );
+
+    }
+
+    else {
+
+      currentTemperature =
+        (float)temperature;
+
+
+      lastTemperature =
+        currentTemperature;
+
+
+      hasResult = true;
+
+
+      if (currentTemperature > maxTemperature) {
+
+        maxTemperature =
+          currentTemperature;
+      }
+    }
+
+
+    // =====================================================
+    // SEND ALL VALUES TO PYTHON
+    // =====================================================
+
+    Serial.print("DATA,");
+
+    // Force
+    Serial.print(currentForce, 2);
+
+    Serial.print(",");
+
+    // Pressure
+    Serial.print(pressureMPa, 3);
+
+    Serial.print(",");
+
+    // Temperature
+    if (!isnan(temperature)) {
+
+      Serial.println(temperature, 2);
+    }
+
+    else {
+
+      Serial.println("nan");
+    }
+
+
+    // =====================================================
+    // WAIT
+    // =====================================================
+
+    delay(750);
+  }
+}

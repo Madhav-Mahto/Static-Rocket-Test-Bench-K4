@@ -1,0 +1,246 @@
+#include "HX711.h"
+
+#define DT 4
+#define SCK 5
+
+HX711 scale;
+
+float calibrationFactor = 9810;
+
+const float GRAVITY = 9.81;
+
+bool measuring = false;
+bool hasResult = false;
+
+float currentForce = 0;
+float lastForce = 0;
+float maxForce = 0;
+
+
+// ================= PRESSURE TRANSDUCER =================
+
+const int pressurePin = A0;
+
+const float VREF = 5.0;
+const float VMIN = 0.5;
+const float VMAX = 4.5;
+const float PMAX = 1.2;
+
+float LP = 0;
+float MP = 0;
+
+
+// ================= MENU =================
+
+void showMenu() {
+
+  Serial.println();
+  Serial.println("========== KAZIAH_AERORESEARCH ==========");
+  Serial.println("1. START READING");
+  Serial.println("2. STOP READING");
+  Serial.println("3. SHOW LAST RESULT");
+  Serial.println("4. TARE Load Cell");
+  Serial.println("5. SHOW MENU");
+  Serial.println("===================================");
+  Serial.println("Enter option:");
+}
+
+
+// ================= SETUP =================
+
+void setup() {
+
+  Serial.begin(9600);
+
+  // Load cell
+  scale.begin(DT, SCK);
+  scale.set_scale(calibrationFactor);
+
+  Serial.println("Taring Load Cell...");
+  scale.tare();
+  Serial.println("Tare Complete");
+
+  // Pressure transducer
+  Serial.println("CHAMBER PRESSURE");
+
+  showMenu();
+}
+
+
+// ================= MAIN LOOP =================
+
+void loop() {
+
+  // ---------- CHECK USER COMMAND ----------
+
+  if (Serial.available() > 0) {
+
+    char command = Serial.read();
+
+    // START
+    if (command == '1') {
+
+      measuring = true;
+
+      maxForce = 0;
+      MP = 0;
+
+      Serial.println();
+      Serial.println("READING STARTED");
+      Serial.println("DATA FORMAT:");
+      Serial.println("DATA,Force(N),Pressure(MPa)");
+    }
+
+
+    // STOP
+    else if (command == '2') {
+
+      measuring = false;
+
+      Serial.println();
+      Serial.println("READING STOPPED");
+
+      Serial.print("Last Force: ");
+      Serial.print(lastForce, 5);
+      Serial.println(" N");
+
+      Serial.print("Maximum Force: ");
+      Serial.print(maxForce, 5);
+      Serial.println(" N");
+
+      Serial.print("Last Chamber Pressure: ");
+      Serial.print(LP, 3);
+      Serial.println(" MPa");
+
+      Serial.print("Max. Chamber Pressure: ");
+      Serial.print(MP, 3);
+      Serial.println(" MPa");
+
+      showMenu();
+    }
+
+
+    // SHOW LAST RESULT
+    else if (command == '3') {
+
+      Serial.println();
+      Serial.println("========== LAST RESULT ==========");
+
+      if (hasResult) {
+
+        Serial.print("Last Force: ");
+        Serial.print(lastForce, 2);
+        Serial.println(" N");
+
+        Serial.print("Maximum Force: ");
+        Serial.print(maxForce, 2);
+        Serial.println(" N");
+
+        Serial.print("Last Pressure: ");
+        Serial.print(LP, 3);
+        Serial.println(" MPa");
+
+        Serial.print("Max. Chamber Pressure: ");
+        Serial.print(MP, 3);
+        Serial.println(" MPa");
+      }
+
+      else {
+
+        Serial.println("No measurement available.");
+      }
+
+      Serial.println("=================================");
+    }
+
+
+    // TARE
+    else if (command == '4') {
+
+      if (!measuring) {
+
+        Serial.println("Taring...");
+
+        scale.tare();
+
+        Serial.println("Tare Complete");
+      }
+
+      else {
+
+        Serial.println("STOP measurement before TARE.");
+      }
+    }
+
+
+    // MENU
+    else if (command == '5') {
+
+      showMenu();
+    }
+  }
+
+
+  // ================= READINGS =================
+
+  if (measuring) {
+
+    // ---------- LOAD CELL ----------
+
+    if (scale.is_ready()) {
+
+      float massKg = scale.get_units(5);
+
+      currentForce = massKg * GRAVITY / 10 ;
+
+      lastForce = currentForce;
+
+      hasResult = true;
+
+      if (currentForce > maxForce) {
+
+        maxForce = currentForce;
+      }
+    }
+
+    else {
+
+      Serial.println("HX711 not detected!");
+    }
+
+
+    // ---------- PRESSURE TRANSDUCER ----------
+
+    int adcValue = analogRead(pressurePin);
+
+    float voltage = adcValue * (VREF / 1023.0);
+
+    float pressureMPa =
+      ((voltage - VMIN) / (VMAX - VMIN)) * PMAX;
+
+    if (pressureMPa < 0) {
+      pressureMPa = 0;
+    }
+
+    LP = pressureMPa;
+
+    hasResult = true;
+
+    if (pressureMPa > MP) {
+      MP = pressureMPa;
+    }
+
+
+    // =================================================
+    // SEND BOTH VALUES TO PYTHON
+    // =================================================
+
+    Serial.print("DATA,");
+    Serial.print(currentForce, 2);
+    Serial.print(",");
+    Serial.println(pressureMPa, 3);
+
+
+    delay(750);
+  }
+}

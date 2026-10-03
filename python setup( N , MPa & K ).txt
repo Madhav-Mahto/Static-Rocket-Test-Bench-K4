@@ -1,0 +1,289 @@
+import serial
+import requests
+import time
+import threading
+
+
+# ==========================================================
+# SETTINGS
+# ==========================================================
+
+SERIAL_PORT = "COM10"       # CHANGE if required
+BAUD_RATE = 9600
+
+THINGSPEAK_WRITE_API_KEY = "GD5CMCG22YIUZJEP"
+
+THINGSPEAK_URL = "https://api.thingspeak.com/update"
+
+UPLOAD_INTERVAL = 16
+
+
+# ==========================================================
+# CONNECT TO ARDUINO
+# ==========================================================
+
+print("Connecting to Arduino...")
+
+arduino = serial.Serial(
+    SERIAL_PORT,
+    BAUD_RATE,
+    timeout=1
+)
+
+time.sleep(2)
+
+print("Arduino connected.")
+print("Sending sensor data to ThingSpeak...")
+print("-----------------------------------")
+
+
+# ==========================================================
+# VARIABLES
+# ==========================================================
+
+latest_force = None
+latest_pressure = None
+latest_temperature = None
+
+last_upload_time = 0
+
+
+# ==========================================================
+# FUNCTION TO SEND COMMANDS TO ARDUINO
+# ==========================================================
+
+def send_commands():
+
+    while True:
+
+        try:
+
+            command = input()
+
+            if command in ["1", "2", "3", "4", "5"]:
+
+                arduino.write(command.encode())
+
+                print("Command sent:", command)
+
+            else:
+
+                print(
+                    "Please enter 1, 2, 3, 4 or 5."
+                )
+
+        except:
+
+            break
+
+
+# ==========================================================
+# START COMMAND THREAD
+# ==========================================================
+
+command_thread = threading.Thread(
+    target=send_commands,
+    daemon=True
+)
+
+command_thread.start()
+
+
+# ==========================================================
+# MAIN LOOP
+# ==========================================================
+
+try:
+
+    while True:
+
+        # --------------------------------------------------
+        # READ ARDUINO SERIAL DATA
+        # --------------------------------------------------
+
+        line = arduino.readline().decode(
+            "utf-8",
+            errors="ignore"
+        ).strip()
+
+
+        if line == "":
+            continue
+
+
+        print("Arduino:", line)
+
+
+        # ==================================================
+        # SENSOR DATA
+        #
+        # Expected:
+        #
+        # DATA,25.37,0.421,145.62
+        #
+        # Force       = 25.37 N
+        # Pressure    = 0.421 MPa
+        # Temperature = 145.62 C
+        #
+        # ==================================================
+
+        if line.startswith("DATA,"):
+
+            try:
+
+                parts = line.split(",")
+
+
+                # DATA + 3 sensor values
+                if len(parts) == 4:
+
+                    latest_force = float(parts[1])
+
+                    latest_pressure = float(parts[2])
+
+                    latest_temperature = float(parts[3])
+
+
+                    print()
+
+                    print(
+                        "================================="
+                    )
+
+                    print(
+                        "SENSOR DATA"
+                    )
+
+                    print(
+                        "Force       :",
+                        latest_force,
+                        "N"
+                    )
+
+                    print(
+                        "Pressure    :",
+                        latest_pressure,
+                        "MPa"
+                    )
+
+                    print(
+                        "Temperature :",
+                        latest_temperature,
+                        "C"
+                    )
+
+                    print(
+                        "================================="
+                    )
+
+                    print()
+
+
+            except ValueError:
+
+                print(
+                    "Invalid DATA:",
+                    line
+                )
+
+
+        # ==================================================
+        # SEND DATA TO THINGSPEAK
+        # ==================================================
+
+        current_time = time.time()
+
+
+        if (
+            latest_force is not None
+            and latest_pressure is not None
+            and latest_temperature is not None
+            and
+            current_time - last_upload_time
+            >= UPLOAD_INTERVAL
+        ):
+
+            print(
+                "Uploading to ThingSpeak..."
+            )
+
+
+            # ------------------------------------------------
+            # THINGSPEAK FIELDS
+            # ------------------------------------------------
+
+            data = {
+
+                "api_key":
+                    THINGSPEAK_WRITE_API_KEY,
+
+                "field1":
+                    latest_force,
+
+                "field2":
+                    latest_pressure,
+
+                "field3":
+                    latest_temperature
+            }
+
+
+            try:
+
+                response = requests.get(
+                    THINGSPEAK_URL,
+                    params=data,
+                    timeout=10
+                )
+
+
+                if response.text != "0":
+
+                    print(
+                        "ThingSpeak upload SUCCESS!"
+                    )
+
+                    print(
+                        "Entry ID:",
+                        response.text
+                    )
+
+                    last_upload_time = (
+                        current_time
+                    )
+
+
+                else:
+
+                    print(
+                        "ThingSpeak upload FAILED!"
+                    )
+
+
+            except requests.exceptions.RequestException as e:
+
+                print(
+                    "ThingSpeak error:",
+                    e
+                )
+
+
+# ==========================================================
+# STOP PROGRAM
+# ==========================================================
+
+except KeyboardInterrupt:
+
+    print()
+
+    print("Stopping...")
+
+
+    # Tell Arduino to stop measurement
+    arduino.write(b"2")
+
+    time.sleep(1)
+
+    arduino.close()
+
+    print("Arduino disconnected.")
